@@ -225,7 +225,7 @@ class ConversationalAgent:
             "👉 Do you have questions about specific fertilizer calculations (NPK dosages), pest control recommendations, or seed varieties? Feel free to ask your next query!"
         )
 
-        models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "groq/compound"]
+        models = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
         
         for model_name in models:
             try:
@@ -246,7 +246,7 @@ class ConversationalAgent:
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=25.0
+                    timeout=5.0
                 )
                 if resp.status_code == 200:
                     data = resp.json()
