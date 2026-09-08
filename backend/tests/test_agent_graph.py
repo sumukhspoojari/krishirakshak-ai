@@ -172,3 +172,24 @@ def test_crops_supported_flow():
     assert output["goal_status"] == "Conversational"
     assert "Chilli" in output["final_response_text"]
     assert "Tomato" in output["final_response_text"]
+
+
+def test_all_crops_agronomic_guides():
+    from app.agents.specialized import ConversationalAgent
+    
+    crops_to_test = [
+        ('how to grow wheat', 'Wheat'),
+        ('how to grow rice', 'Paddy / Rice'),
+        ('steps to grow cotton', 'Cotton'),
+        ('how to grow tomato', 'Tomato'),
+        ('how to cultivate sugarcane', 'Sugarcane'),
+        ('how to grow maize', 'Maize'),
+        ('how to grow groundnut', 'Groundnut'),
+        ('steps to grow raagi', 'Raagi')
+    ]
+    
+    for query, expected_name in crops_to_test:
+        resp = ConversationalAgent.get_response('agronomy_query', 'en', query)
+        assert resp is not None and len(resp) > 100
+        assert 'Welcome to KrishiRakshak AI' not in resp, f'Failed for {query}: got welcome greeting!'
+        assert len(resp) > 50

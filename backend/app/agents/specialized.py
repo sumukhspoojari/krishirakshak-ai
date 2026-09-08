@@ -188,13 +188,14 @@ class ConversationalAgent:
     @classmethod
     def get_groq_agronomy_response(cls, user_text: str, lang: str) -> str:
         """
-        Uses Groq LLM (qwen/qwen3.8-27b) to generate an authoritative, step-by-step
-        crop cultivation and agricultural guide in the farmer's language.
+        Uses Groq Cloud API via httpx / Groq SDK with automatic multi-model failover
+        to generate an authoritative, step-by-step crop cultivation guide in the farmer's language.
         """
         import os
+        import httpx
         from app.config import settings
 
-        api_key = settings.GROQ_API_KEY or os.getenv("GROQ_API_KEY")
+        api_key = (settings.GROQ_API_KEY or os.getenv("GROQ_API_KEY") or "").strip()
         if not api_key:
             return cls.get_fallback_agronomy_response(user_text, lang)
 
@@ -224,83 +225,208 @@ class ConversationalAgent:
             "👉 Do you have questions about specific fertilizer calculations (NPK dosages), pest control recommendations, or seed varieties? Feel free to ask your next query!"
         )
 
-        try:
-            from groq import Groq
-            client = Groq(api_key=api_key)
-            resp = client.chat.completions.create(
-                model="qwen/qwen3.8-27b",
-                messages=[
-                    {"role": "system", "content": prompt_system},
-                    {"role": "user", "content": user_text}
-                ],
-                max_tokens=900,
-                temperature=0.3
-            )
-            ans = resp.choices[0].message.content
-            if ans and len(ans.strip()) > 50:
-                return ans.strip()
-        except Exception as e:
-            print("Groq agronomy query error, falling back to local database:", e)
+        models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "groq/compound"]
+        
+        for model_name in models:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": model_name,
+                    "messages": [
+                        {"role": "system", "content": prompt_system},
+                        {"role": "user", "content": user_text}
+                    ],
+                    "max_tokens": 1200,
+                    "temperature": 0.3
+                }
+                resp = httpx.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=25.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ans = data["choices"][0]["message"]["content"]
+                    if ans and len(ans.strip()) > 50:
+                        return ans.strip()
+            except Exception as e:
+                print(f"Groq model {model_name} attempt failed:", e)
 
         return cls.get_fallback_agronomy_response(user_text, lang)
 
     @classmethod
     def get_fallback_agronomy_response(cls, user_text: str, lang: str) -> str:
         """
-        Built-in curated agronomic cultivation guide for Ragi and major crops.
+        Built-in curated agronomic cultivation guide covering ALL major Indian crops
+        (Wheat, Rice, Cotton, Maize, Chilli, Tomato, Sugarcane, Groundnut, Onion, Potato, etc.).
         """
         lower = user_text.lower()
-        if "ragi" in lower or "raagi" in lower or "finger millet" in lower or "ರಾಗಿ" in lower:
+
+        # 1. WHEAT (ಗೋಧಿ / गेहूं)
+        if any(w in lower for w in ["wheat", "ಗೋಧಿ", "गेहूं", "గోధుమ"]):
             if lang == "kn":
                 return (
-                    "🌾 **ರಾಗಿ (Raagi / Finger Millet) ಬೆಳೆಯುವ ಹಂತ-ಹಂತದ ಸಂಪೂರ್ಣ ಮಾರ್ಗದರ್ಶನ:**\n\n"
-                    "ರಾಗಿ ಕರ್ನಾಟಕದ ಅತ್ಯಂತ ಪ್ರಮುಖ ಮತ್ತು ಪೌಷ್ಟಿಕಾಂಶಭರಿತ ಆಹಾರ ಬೆಳೆಯಾಗಿದೆ.\n\n"
-                    "1. **ಮಣ್ಣು ಮತ್ತು ಹವಾಗುಣ (Soil & Climate):**\n"
-                    "• ಕೆಂಪು ಗೋಡು ಮಣ್ಣು, ಮರಳು ಮಿಶ್ರಿತ ಗೋಡು ಮಣ್ಣು ಅತ್ಯುತ್ತಮ. ಜಲಾವೃತವಾಗದ ಉತ್ತಮ ಬಸಿಗಾಲುವೆ ಹೊಂದಿರಬೇಕು. pH 6.0 ರಿಂದ 7.5 ಸೂಕ್ತ.\n\n"
-                    "2. **ಉನ್ನತ ಇಳುವರಿ ತಳಿಗಳು (Top Varieties):**\n"
-                    "• MR-1, MR-6, GPU-28, GPU-48, ML-365, KMR-301, ಮತ್ತು ಇತ್ತೀಚಿನ KMR-630.\n\n"
-                    "3. **ಭೂಮಿ ಸಿದ್ಧತೆ ಮತ್ತು ಬೀಜೋಪಚಾರ:**\n"
-                    "• ಭೂಮಿಯನ್ನು 2-3 ಬಾರಿ ಆಳವಾಗಿ ಉಳುಮೆ ಮಾಡಿ ಹದಗೊಳಿಸಿ. ಪ್ರತಿ ಎಕರೆಗೆ 4-5 ಟನ್ ಕಾಂಪೋಸ್ಟ್ ಅಥವಾ ಕೊಟ್ಟಿಗೆ ಗೊಬ್ಬರ ಸೇರಿಸಿ.\n"
-                    "• ಬೀಜೋಪಚಾರ: ಪ್ರತಿ ಕೆ.ಜಿ. ಬೀಜಕ್ಕೆ 2 ಗ್ರಾಂ ಕಾರ್ಬೆಂಡಾಜಿಮ್ ಅಥವಾ 5 ಗ್ರಾಂ ಟ್ರೈಕೋಡರ್ಮಾ ವಿರಿಡೆ ಬೆರೆಸಿ ಉಪಚರಿಸಿ.\n\n"
-                    "4. **ಬಿತ್ತನೆ ಸಮಯ ಮತ್ತು ಬೀಜದ ಪ್ರಮಾಣ:**\n"
-                    "• ಜುಲೈ 15 ರಿಂದ ಆಗಸ್ಟ್ 15 ಬಿತ್ತನೆಗೆ ಅತ್ಯಂತ ಸೂಕ್ತ ಸಮಯ.\n"
-                    "• ಬೀಜದ ಪ್ರಮಾಣ: ಕೂರಿಗೆ ಬಿತ್ತನೆಗೆ ಎಕರೆಗೆ 4-5 ಕೆ.ಜಿ., ನಾಟಿ ಪದ್ಧತಿಗೆ (Transplanting) ಎಕರೆಗೆ 2 ಕೆ.ಜಿ. ಸಾಕು. ಸಾಲಿನಿಂದ ಸಾಲಿಗೆ 22.5 - 30 ಸೆಂ.ಮೀ. ಅಂತರವಿರಲಿ.\n\n"
-                    "5. **ರಸಗೊಬ್ಬರ ನಿರ್ವಹಣೆ (NPK Dosage per Acre):**\n"
-                    "• ಮಳೆ ಆಶ್ರಿತ ಬೆಳೆಗೆ: 20 ಕೆ.ಜಿ. ಸಾರಜನಕ (N), 16 ಕೆ.ಜಿ. ರಂಜಕ (P), 12 ಕೆ.ಜಿ. ಪೊಟ್ಯಾಶ್ (K).\n"
-                    "• ನೀರಾವರಿ ಬೆಳೆಗೆ: 40 ಕೆ.ಜಿ. N, 20 ಕೆ.ಜಿ. P, 20 ಕೆ.ಜಿ. K. ಅರ್ಧ ಸಾರಜನಕ ಮತ್ತು ಪೂರ್ಣ ಪ್ರಮಾಣದ ರಂಜಕ, ಪೊಟ್ಯಾಶ್ ಅನ್ನು ಬಿತ್ತನೆ ಸಮಯದಲ್ಲಿ ಆಧಾರ ಗೊಬ್ಬರವಾಗಿ ನೀಡಿ. ಉಳಿದ ಸಾರಜನಕವನ್ನು ಬಿತ್ತಿದ 25-30 ದಿನಗಳ ನಂತರ ಮೇಲುಗೊಬ್ಬರವಾಗಿ ನೀಡಿ.\n\n"
-                    "6. **ಕಳೆ ಮತ್ತು ನೀರು ನಿರ್ವಹಣೆ:**\n"
-                    "• ಬಿತ್ತಿದ 20 ಮತ್ತು 35ನೇ ದಿನಗಳಲ್ಲಿ ಎಡೆಕುಂಟೆ ಹೊಡೆದು ಕಳೆ ತೆಗೆಯಿರಿ.\n"
-                    "• ಹೂವಾಡುವ ಮತ್ತು ಕಾಳು ಕಟ್ಟುವ ಹಂತಗಳಲ್ಲಿ ನೀರಿನ ಕೊರತೆಯಾಗದಂತೆ ನಿಗಾವಹಿಸಿ.\n\n"
-                    "7. **ಕಟಾವು ಮತ್ತು ಇಳುವರಿ:**\n"
-                    "• ತೆನೆಗಳು ಕಂದು ಬಣ್ಣಕ್ಕೆ ತಿರುಗಿದಾಗ ಕಟಾವು ಮಾಡಿ. ಎಕರೆಗೆ ಸರಾಸರಿ 12 ರಿಂದ 16 ಕ್ವಿಂಟಾಲ್ ರಾಗಿ ಮತ್ತು 2 ಟನ್ ಮೇವು ಸಿಗುತ್ತದೆ.\n\n"
-                    "👉 ನಿಮ್ಮ ಹೊಲದ ಮಣ್ಣಿಗೆ ಸೂಕ್ತವಾದ ರಸಗೊಬ್ಬರ ಪ್ರಮಾಣ ಅಥವಾ ರಾಗಿ ತಳಿಗಳ ಬಗ್ಗೆ ಇನ್ನಾವುದಾದರೂ ಪ್ರಶ್ನೆ ಇದೆಯೇ? ದಯವಿಟ್ಟು ಕೇಳಿ! 🌾"
+                    "🌾 **ಗೋಧಿ (Wheat) ಬೆಳೆಯುವ ಹಂತ-ಹಂತದ ಸಂಪೂರ್ಣ ಮಾರ್ಗದರ್ಶನ:**\n\n"
+                    "1. **ಮಣ್ಣು ಮತ್ತು ಹವಾಗುಣ:**\n"
+                    "• ಫಲವತ್ತಾದ ಗೋಡು ಮತ್ತು ಜೇಡಿ ಗೋಡು ಮಣ್ಣು ಸೂಕ್ತ. ಚಳಿಗಾಲದ ತಂಪಾದ ವಾತಾವರಣ (15°C–25°C) ಅಗತ್ಯ.\n\n"
+                    "2. **ಉನ್ನತ ಇಳುವರಿ ತಳಿಗಳು:**\n"
+                    "• HD-2967, PBW-550, DBW-187 (Karan Vandana), DWR-162, ಮತ್ತು DWR-2006 (ಕರ್ನಾಟಕಕ್ಕೆ ಸೂಕ್ತ).\n\n"
+                    "3. **ಭೂಮಿ ಸಿದ್ಧತೆ ಮತ್ತು ಬಿತ್ತನೆ:**\n"
+                    "• 2–3 ಬಾರಿ ಉಳುಮೆ ಮಾಡಿ ಮಣ್ಣನ್ನು ಹದಗೊಳಿಸಿ. ಬಿತ್ತನೆ ಸಮಯ: ನವೆಂಬರ್ ಮೊದಲನೇ ವಾರದಿಂದ ನವೆಂಬರ್ 25.\n"
+                    "• ಬೀಜದ ಪ್ರಮಾಣ: ಎಕರೆಗೆ 40–45 ಕೆ.ಜಿ. ಸಾಲಿನಿಂದ ಸಾಲಿಗೆ 20 ಸೆಂ.ಮೀ. ಅಂತರವಿರಲಿ.\n\n"
+                    "4. **ರಸಗೊಬ್ಬರ ಪ್ರಮಾಣ (ಎಕರೆಗೆ NPK):**\n"
+                    "• 40 ಕೆ.ಜಿ. ಸಾರಜನಕ, 20 ಕೆ.ಜಿ. ರಂಜಕ, 15 ಕೆ.ಜಿ. ಪೊಟ್ಯಾಶ್. ಬಿತ್ತನೆ ವೇಳೆ ಅರ್ಧ ಸಾರಜನಕ, ಪೂರ್ಣ ರಂಜಕ ಮತ್ತು ಪೊಟ್ಯಾಶ್ ನೀಡಿ; ಉಳಿದ ಸಾರಜನಕವನ್ನು ಮೊದಲ ನೀರಾವರಿ ವೇಳೆ (21ನೇ ದಿನ) ನೀಡಿ.\n\n"
+                    "5. **ಕ್ರಾಂತಿಕಾರಿ ನೀರಾವರಿ ಹಂತಗಳು:**\n"
+                    "• ಬಿತ್ತಿದ 21ನೇ ದಿನ (ಕಿರೀಟ ಬೇರು ಬಿಡುವ ಹಂತ – CRI), ತೆನೆ ಹೊರಬರುವ ಹಂತ ಮತ್ತು ಕಾಳು ಕಟ್ಟುವ ಹಂತಗಳಲ್ಲಿ ನೀರು ಅತ್ಯಗತ್ಯ.\n\n"
+                    "6. **ಕಟಾವು ಮತ್ತು ಇಳುವರಿ:**\n"
+                    "• ತೆನೆಗಳು ಬಂಗಾರದ ಬಣ್ಣಕ್ಕೆ ತಿರುಗಿ ಕಾಳುಗಳು ಗಟ್ಟಿಯಾದಾಗ ಕಟಾವು ಮಾಡಿ. ಎಕರೆಗೆ 18–24 ಕ್ವಿಂಟಾಲ್ ಇಳುವರಿ ನಿರೀಕ್ಷಿಸಬಹುದು.\n\n"
+                    "👉 ಗೋಧಿ ತಳಿಗಳು, ಕಳೆನಾಶಕ ಅಥವಾ ರಸಗೊಬ್ಬರ ನಿರ್ವಹಣೆಯ ಬಗ್ಗೆ ಇನ್ನಷ್ಟು ತಿಳಿಯಬೇಕೆ? ದಯವಿಟ್ಟು ಕೇಳಿ! 🌾"
                 )
             else:
                 return (
-                    "🌾 **Step-by-Step Cultivation Guide for Raagi (Finger Millet):**\n\n"
-                    "Raagi is one of India's most climate-resilient and nutrient-dense millets.\n\n"
-                    "1. **Soil & Climate:**\n"
-                    "• Thrives in well-drained red loamy and sandy loam soils. Ideal pH is 6.0 to 7.5. Avoid waterlogged fields.\n\n"
-                    "2. **Popular High-Yield Varieties:**\n"
-                    "• GPU-28, GPU-48, ML-365, KMR-301, MR-6, and Indaf-9.\n\n"
-                    "3. **Land Preparation & Seed Treatment:**\n"
-                    "• Plow 2–3 times to obtain a fine tilth. Incorporate 4–5 tonnes/acre of FYM or well-decomposed compost.\n"
-                    "• Seed Treatment: Treat seeds with *Trichoderma viride* @ 5g/kg or Carbendazim @ 2g/kg seed to prevent seedling blast and root rot.\n\n"
-                    "4. **Sowing Time & Seed Rate:**\n"
-                    "• Optimum sowing time: Mid-June to Mid-August (Kharif season).\n"
-                    "• Seed Rate: 4–5 kg/acre for direct line sowing; 2 kg/acre for transplanting method. Spacing: 30 cm between rows, 10 cm between plants.\n\n"
-                    "5. **Fertilizer Management (NPK per Acre):**\n"
-                    "• Rainfed crop: 20 kg Nitrogen, 16 kg Phosphorus, 12 kg Potash.\n"
-                    "• Irrigated crop: 40 kg Nitrogen, 20 kg Phosphorus, 20 kg Potash.\n"
-                    "• Apply 50% N + 100% P & K as basal dose at sowing; top-dress remaining 50% N at 25–30 days after sowing.\n\n"
-                    "6. **Water & Weed Management:**\n"
-                    "• Perform inter-cultivation/hoeing at 20 and 35 days after sowing.\n"
-                    "• Critical irrigation stages: Tillering, Flowering, and Grain filling stage.\n\n"
-                    "7. **Harvest & Expected Yield:**\n"
-                    "• Harvest when ear heads turn golden brown and seeds harden. Expected yield: 12–16 quintals of grain and 2 tonnes of nutritious straw per acre.\n\n"
-                    "👉 Do you have specific questions on fertilizer calculation, seed sourcing, or weed control for Raagi? Feel free to ask!"
+                    "🌾 **Step-by-Step Cultivation Guide for Wheat (Triticum aestivum):**\n\n"
+                    "1. **Soil & Climate Requirements:**\n"
+                    "• Well-drained fertile loamy to clay-loam soils with pH 6.0–7.5. Requires cool winter temperatures during vegetative growth.\n\n"
+                    "2. **Popular High-Yielding Varieties:**\n"
+                    "• HD-2967, PBW-550, DBW-187 (Karan Vandana), HD-3086, GW-322, and DWR-162.\n\n"
+                    "3. **Land Preparation & Sowing:**\n"
+                    "• Plow 2–3 times to create a fine, pulverized seedbed. Apply 4–5 tonnes/acre of compost or FYM.\n"
+                    "• Optimum Sowing: November 1 to November 25. Seed rate: 40–45 kg/acre. Spacing: 20 cm between rows, 4–5 cm deep.\n\n"
+                    "4. **Fertilizer Schedule (NPK per Acre):**\n"
+                    "• Irrigated Wheat: 48 kg Nitrogen, 24 kg Phosphorus, 16 kg Potash.\n"
+                    "• Apply 50% N + 100% P & K as basal dose at sowing; top-dress remaining 50% N at first irrigation (CRI stage, 21 days).\n\n"
+                    "5. **Critical Irrigation Stages:**\n"
+                    "• 1st: Crown Root Initiation (CRI) at 20–25 days (crucial!)\n"
+                    "• 2nd: Tillering (40–45 days)\n"
+                    "• 3rd: Boot/Flowering stage (60–65 days)\n"
+                    "• 4th: Milking and Grain filling stage (80–95 days)\n\n"
+                    "6. **Harvesting & Expected Yield:**\n"
+                    "• Harvest when straw turns golden-yellow and moisture drops below 14%. Expected yield: 18–25 quintals per acre.\n\n"
+                    "👉 Do you need specific advice on weed control, rust prevention, or fertilizer calculations for your farm? Feel free to ask!"
                 )
-        return cls.RESPONSES["general_inquiry"].get(lang, cls.RESPONSES["general_inquiry"]["en"])
+
+        # 2. RICE / PADDY (ಭತ್ತ / धान / चावल)
+        elif any(w in lower for w in ["rice", "paddy", "ಭತ್ತ", "ಅಕ್ಕಿ", "धान", "चावल", "వరి"]):
+            if lang == "kn":
+                return (
+                    "🌾 **ಭತ್ತ (Paddy / Rice) ಬೆಳೆಯುವ ಹಂತ-ಹಂತದ ಸಂಪೂರ್ಣ ಮಾರ್ಗದರ್ಶನ:**\n\n"
+                    "1. **ಮಣ್ಣು:** ನೀರು ಹಿಡಿದಿಟ್ಟುಕೊಳ್ಳುವ ಜೇಡಿ ಮಣ್ಣು ಅಥವಾ ಗೋಡು ಜೇಡಿ ಮಣ್ಣು ಅತ್ಯುತ್ತಮ.\n"
+                    "2. **ಉನ್ನತ ತಳಿಗಳು:** ಜ್ಯೋತಿ, ಗಂಗಾವತಿ ಸೋನಾ, ಜಿಂಟೆಕ್ಸ್-1001, ತನು, ಬಿಪಿಟಿ-5204 (ಸಾಂಬಾ ಮಸೂರಿ).\n"
+                    "3. **ನಾಟಿ ಮತ್ತು ಬೀಜೋಪಚಾರ:** ಎಕರೆಗೆ 15–20 ಕೆ.ಜಿ. ಬೀಜ. ಸ್ಯೂಡೋಮೊನಾಸ್ ಅಥವಾ ಕಾರ್ಬೆಂಡಾಜಿಮ್‌ನಿಂದ ಬೀಜೋಪಚಾರ ಮಾಡಿ 25 ದಿನಗಳ ಸಸಿಗಳನ್ನು ನಾಟಿ ಮಾಡಿ (20x10 ಸೆಂ.ಮೀ. ಅಂತರ).\n"
+                    "4. **ರಸಗೊಬ್ಬರ (NPK):** ಎಕರೆಗೆ 40 ಕೆ.ಜಿ. N, 20 ಕೆ.ಜಿ. P, 20 ಕೆ.ಜಿ. K. ಸಾರಜನಕವನ್ನು ಮೂರು ಕಂತುಗಳಲ್ಲಿ (ನಾಟಿ ವೇಳೆ, ತೆನೆ ಕಟ್ಟುವಾಗ, ಹೂವಾಡುವಾಗ) ನೀಡಿ.\n"
+                    "5. **ಇಳುವರಿ:** ಎಕರೆಗೆ 22–28 ಕ್ವಿಂಟಾಲ್ ಭತ್ತ ನಿರೀಕ್ಷಿಸಬಹುದು."
+                )
+            else:
+                return (
+                    "🌾 **Step-by-Step Cultivation Guide for Paddy / Rice:**\n\n"
+                    "1. **Soil & Field Prep:** Clayey loams with high water retention capacity. Puddle the field 2–3 times and level thoroughly.\n"
+                    "2. **Top High-Yield Varieties:** BPT-5204 (Samba Mahsuri), MTU-1010, IR-64, Swarna, Jyothi, and DRR-44.\n"
+                    "3. **Sowing & Nursery:** Seed rate: 15–20 kg/acre. Transplant 21–25 day old seedlings at 20 cm x 10 cm spacing (2–3 seedlings per hill).\n"
+                    "4. **Fertilizer Management (NPK per acre):** 40 kg Nitrogen, 20 kg Phosphorus, 20 kg Potash. Split N: 50% basal, 25% at tillering, 25% at panicle initiation.\n"
+                    "5. **Water & Weed Control:** Keep 2–3 cm standing water till grain hardening; drain 10 days before harvest.\n"
+                    "6. **Harvest & Yield:** Harvest at 80% golden grains. Expected yield: 22–30 quintals/acre."
+                )
+
+        # 3. MAIZE / CORN (ಮೆಕ್ಕೆಜೋಳ / मक्का)
+        elif any(w in lower for w in ["maize", "corn", "ಮೆಕ್ಕೆಜೋಳ", "ಜೋಳ", "मक्का", "మొక్కజొన్న"]):
+            return (
+                "🌽 **Step-by-Step Cultivation Guide for Maize / Corn:**\n\n"
+                "1. **Soil & Sowing:** Well-drained fertile loamy soils. Sowing: Kharif (June–July) or Rabi (Oct–Nov). Seed rate: 7–8 kg/acre. Spacing: 60 cm x 20 cm.\n"
+                "2. **Top Hybrids:** CP-818, Dekalb 9108, Pioneer P3396, NK-6240, and NAH-1137.\n"
+                "3. **Fertilizer Dosage (per acre):** 60 kg Nitrogen, 24 kg Phosphorus, 20 kg Potash + 10 kg Zinc Sulphate.\n"
+                "4. **Fall Armyworm Protection:** Spray *Bacillus thuringiensis* (Bt) or Emamectin benzoate @ 0.4g/litre of water into the whorls.\n"
+                "5. **Harvest & Yield:** Harvest when husk covers turn dry-brown. Expected yield: 25–35 quintals/acre."
+            )
+
+        # 4. COTTON (ಹತ್ತಿ / कपास)
+        elif any(w in lower for w in ["cotton", "ಹತ್ತಿ", "कपास", "పత్తి"]):
+            return (
+                "🌱 **Step-by-Step Cultivation Guide for Cotton:**\n\n"
+                "1. **Soil & Sowing:** Deep black cotton soils (Vertisols) or fertile loams. Sowing time: May to July. Spacing: 90 cm x 60 cm (Bt Cotton).\n"
+                "2. **Top Bt Varieties:** RCH-659, Kaveri Jadu, Ankur-3028, and Mallika.\n"
+                "3. **NPK Schedule (per acre):** 48 kg Nitrogen, 24 kg Phosphorus, 24 kg Potash applied in 3 splits at vegetative, square, and boll development stages.\n"
+                "4. **Pink Bollworm Management:** Install pheromone traps @ 5/acre and spray Neem oil (1500 ppm) or Chlorantraniliprole 18.5% SC @ 0.3 ml/L.\n"
+                "5. **Yield:** 10–14 quintals/acre of seed cotton."
+            )
+
+        # 5. CHILLI (ಮೆಣಸಿನಕಾಯಿ / मिर्च)
+        elif any(w in lower for w in ["chilli", "chilly", "mirchi", "ಮೆಣಸಿನಕಾಯಿ", "ಮೆಣಸಿನ", "मिर्च", "మిర్చి"]):
+            return (
+                "🌶️ **Step-by-Step Cultivation Guide for Chilli:**\n\n"
+                "1. **Soil:** Well-drained sandy loam or clay loam with organic matter. Avoid waterlogged fields.\n"
+                "2. **Top Varieties:** G-4, Byadagi Kaddi, Sitara, Teja, and Indam-5.\n"
+                "3. **Transplanting:** 30–35 days old seedlings at 60 cm x 45 cm spacing.\n"
+                "4. **Fertilizer (NPK per acre):** 40 kg Nitrogen, 20 kg Phosphorus, 20 kg Potash. Apply 50% N + full P, K at planting; balance N in 2 splits.\n"
+                "5. **Sucking Pest Control (Thrips/Mites):** Spray Fipronil 5% SC @ 1.5 ml/L or Diafenthiuron 50% WP @ 1g/L.\n"
+                "6. **Yield:** Dry chilli 10–15 quintals/acre; green chilli 60–80 quintals/acre."
+            )
+
+        # 6. TOMATO (ಟೊಮೆಟೊ / टमाटर)
+        elif any(w in lower for w in ["tomato", "ಟೊಮ್ಯಾಟೋ", "ಟೊಮೆಟೊ", "टमाटर", "టమాటా"]):
+            return (
+                "🍅 **Step-by-Step Cultivation Guide for Tomato:**\n\n"
+                "1. **Soil & Nursery:** Deep, loamy soil with good drainage. 25-day seedlings transplanted at 60 cm x 45 cm (or 90 cm on raised beds).\n"
+                "2. **Top Hybrids:** Arka Rakshak (triple disease resistant), Arka Abhed, Syngenta Abhinav, and US-440.\n"
+                "3. **Fertilizer per Acre:** 60 kg N, 40 kg P, 40 kg K. Drip fertigation with 19:19:19 recommended.\n"
+                "4. **Trellising & Staking:** Stake plants with bamboo or twine at 30 days to protect fruits from soil rot.\n"
+                "5. **Yield:** 25–35 tonnes per acre under good management."
+            )
+
+        # 7. SUGARCANE (ಕಬ್ಬು / गन्ना)
+        elif any(w in lower for w in ["sugarcane", "ಕಬ್ಬು", "गन्ना", "చెరకు"]):
+            return (
+                "🎋 **Step-by-Step Cultivation Guide for Sugarcane:**\n\n"
+                "1. **Soil & Planting:** Deep fertile loams or clay loams. Planting seasons: Adsali (July–Aug), Eksali (Jan–Feb). Spacing: 4 to 5 feet row width.\n"
+                "2. **Top Varieties:** Co-86032 (Nayana), Co-0238, Co-62175, and VSI-434.\n"
+                "3. **Fertilizer (NPK per acre):** 100 kg Nitrogen, 40 kg Phosphorus, 48 kg Potash. Complete earthing up at 120 days.\n"
+                "4. **Expected Yield:** 50–70 tonnes/acre."
+            )
+
+        # 8. GROUNDNUT / PEANUT (ಕಡಲೆಕಾಯಿ / मूंगफली)
+        elif any(w in lower for w in ["groundnut", "peanut", "ಕಡಲೆಕಾಯಿ", "ಶೇಂಗಾ", "मूंगफली", "వేరుశనగ"]):
+            return (
+                "🥜 **Step-by-Step Cultivation Guide for Groundnut:**\n\n"
+                "1. **Soil & Season:** Sandy loams with loose texture to facilitate easy peg penetration. Kharif (June–July) or Rabi/Summer (Dec–Jan).\n"
+                "2. **Top Varieties:** TMV-2, JL-24, K-6 (Kadiri), GPBD-4 (rust resistant), and G2-52.\n"
+                "3. **Seed Treatment:** Treat pods/kernels with *Trichoderma* @ 5g/kg + Rhizobium culture.\n"
+                "4. **Fertilizer:** 10 kg N, 20 kg P, 15 kg K per acre + **Gypsum @ 200 kg/acre at flowering/pegging stage** (critical for pod filling!).\n"
+                "5. **Yield:** 10–14 quintals/acre."
+            )
+
+        # 9. RAGI / FINGER MILLET (ರಾಗಿ / रागी)
+        elif any(w in lower for w in ["ragi", "raagi", "finger millet", "ರಾಗಿ", "रागी", "రాగి"]):
+            return (
+                "🌾 **Step-by-Step Cultivation Guide for Raagi (Finger Millet):**\n\n"
+                "1. **Soil & Climate:** Thrives in red loamy soils. Sowing time: July 15 to August 15. Seed rate: 4–5 kg/acre.\n"
+                "2. **Top Varieties:** GPU-28, GPU-48, ML-365, KMR-301, and MR-6.\n"
+                "3. **Fertilizer (per acre):** 20 kg Nitrogen, 16 kg Phosphorus, 12 kg Potash (rainfed); double for irrigated.\n"
+                "4. **Yield:** 12–16 quintals of grain and 2 tonnes of nutritious straw per acre."
+            )
+
+        # 10. GENERAL AGRONOMY GUIDE FOR ANY OTHER CROP
+        crop_name = lower.replace("how to grow", "").replace("steps to grow", "").replace("how to cultivate", "").replace("cultivation of", "").replace("guide", "").strip()
+        crop_title = crop_name.title() if crop_name else "Crop"
+        
+        return (
+            f"🌾 **Step-by-Step Cultivation Guide for {crop_title}:**\n\n"
+            f"1. **Soil & Land Preparation:**\n"
+            f"• Deep plow 2–3 times to create a loose, friable seedbed. Incorporate 4–5 tonnes/acre of well-decomposed farmyard manure (FYM).\n\n"
+            f"2. **Seed Treatment & Sowing:**\n"
+            f"• Treat certified seeds with *Trichoderma viride* @ 5g/kg or Carbendazim @ 2g/kg to prevent damping-off and root diseases.\n"
+            f"• Follow recommended regional spacing and sowing depth for {crop_title}.\n\n"
+            f"3. **Balanced Plant Nutrition (NPK per Acre):**\n"
+            f"• Apply balanced Nitrogen, Phosphorus, and Potash based on soil testing. Provide 50% N and all P & K at planting; top-dress the remaining Nitrogen during peak vegetative growth.\n\n"
+            f"4. **Irrigation & Weed Management:**\n"
+            f"• Keep the field weed-free during the critical first 30–45 days through inter-cultivation or hand weeding.\n"
+            f"• Ensure moisture availability during flowering and yield-forming stages.\n\n"
+            f"5. **Plant Protection:**\n"
+            f"• Regularly scout for early signs of sucking pests or leaf spots. Apply biological bio-pesticides or recommended ICAR-approved sprays promptly.\n\n"
+            f"👉 What specific variety, region, or problem are you facing with {crop_title}? Ask away and I will provide exact dosages!"
+        )
 
     @classmethod
     def get_response(cls, intent: str, lang: str, user_text: str = "") -> str:
