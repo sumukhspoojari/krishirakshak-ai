@@ -1,0 +1,40 @@
+# Environment variables and secrets (NEVER COMMIT KEYS)
+.env
+.env.*
+!.env.example
+!*.env.example
+!**/.env.example
+
+# Databases
+*.db
+*.sqlite3
+*.sqlite
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Node.js and Frontend build outputs
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Uploaded crop and leaf images (preserved locally, excluded from git)
+backend/uploads/*
+!backend/uploads/.gitkeep
+uploads/*
+!uploads/.gitkeep
+
+# IDE and OS artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
